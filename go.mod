@@ -2,17 +2,16 @@ module pcp-server
 
 go 1.20
 
-//replace github.com/coreos/go-iptables => /home/sb/Sources/github.com/SlyngDK/go-iptables
-replace github.com/coreos/go-iptables => github.com/slyngdk/go-iptables v0.6.0-sudo-preview1
-
 require (
-	github.com/slyngdk/go-iptables v0.6.0-sudo-preview1
+	github.com/coreos/go-iptables v0.6.0
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.3.0
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/timshannon/badgerhold v1.0.0
 	go.uber.org/zap v1.24.0
 )
+
+replace github.com/coreos/go-iptables => github.com/slyngdk/go-iptables v0.0.0-20230212184852-41950b3865a8
 
 require (
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect

@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/google/shlex"
-	"github.com/slyngdk/go-iptables/iptables"
 	"go.uber.org/zap"
 	"math/rand"
 	"strconv"
