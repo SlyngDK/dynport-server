@@ -69,7 +69,15 @@ func start() {
 
 	ipt.Reconcile()
 
-	pcp := NewPCPServer(logger, ipt, store)
+	var externalIP net.IP
+	if config.ExternalIP != "" {
+		externalIP = net.ParseIP(config.ExternalIP)
+	}
+
+	pcp, err := NewPCPServer(logger, ipt, store, config.ListenAddr, externalIP)
+	if err != nil {
+		logger.With(zap.Error(err)).Fatal("failed to create new pcp server")
+	}
 	err = pcp.Start()
 	if err != nil {
 		logger.With(zap.Error(err)).Error("failed to start pcp server")

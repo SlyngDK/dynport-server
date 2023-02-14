@@ -11,15 +11,24 @@ import (
 
 type PCPServer struct {
 	conn       net.PacketConn
+	externalIP net.IP
+	ipt        *IPTablesManager
 	l          *zap.SugaredLogger
 	listenAddr string
 	started    time.Time
-	ipt        *IPTablesManager
 	store      *DataStore
 }
 
-func NewPCPServer(l *zap.Logger, ipt *IPTablesManager, store *DataStore) *PCPServer {
-	return &PCPServer{l: l.Sugar(), ipt: ipt, store: store, listenAddr: ":5351"}
+func NewPCPServer(l *zap.Logger, ipt *IPTablesManager, store *DataStore, listenAddr string, externalIP net.IP) (*PCPServer, error) {
+	p := &PCPServer{l: l.Sugar(), ipt: ipt, store: store, listenAddr: listenAddr, externalIP: externalIP}
+	if p.externalIP.IsUnspecified() || p.externalIP == nil {
+		outboundIP, err := p.GetOutboundIP()
+		if err != nil {
+			return nil, fmt.Errorf("failed to auto detect outbound ip: %v", err)
+		}
+		p.externalIP = outboundIP.To4()
+	}
+	return p, nil
 }
 
 func (p *PCPServer) Start() error {
@@ -67,6 +76,8 @@ func (p *PCPServer) handleRequest(addr net.Addr, buf []byte) error {
 func (p *PCPServer) handleNATPMPRequest(addr net.Addr, buf []byte) error {
 	if len(buf) >= 2 {
 		switch buf[1] {
+		case 0:
+			return p.handleNATPMPExternalAddressRequest(addr)
 		case 1: // UDP mapping request
 			return p.handleNATPMPMappingRequest(1, addr, buf[4:])
 		case 2: // TCP mapping request
@@ -93,6 +104,19 @@ func (p *PCPServer) responseWithErrorResultCode(addr net.Addr, code uint16) {
 	}
 }
 
+func (p *PCPServer) handleNATPMPExternalAddressRequest(addr net.Addr) error {
+	res := make([]byte, 12)
+	res[1] = 128 + 0 // Response op code
+	// 2 byte result code
+	sec := time.Now().Unix() - p.started.Unix()
+	writeNetworkOrderUint32(res[4:8], uint32(sec)) // Seconds Since Start of Epoch
+	writeNetworkOrderIP(res[8:12], p.externalIP.To4())
+	if p.conn != nil {
+		_, err := p.conn.WriteTo(res, addr)
+		return err
+	}
+	return nil
+}
 func (p *PCPServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf []byte) error {
 	internalPort, buf := readNetworkOrderUint16(buf)
 	externalPort, buf := readNetworkOrderUint16(buf)
@@ -177,6 +201,20 @@ func (p *PCPServer) Stop() error {
 	}
 	return nil
 }
+
+// Get preferred outbound ip of this machine
+func (p *PCPServer) GetOutboundIP() (net.IP, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	return localAddr.IP, nil
+}
+
 func writeNetworkOrderUint16(buf []byte, d uint16) {
 	buf[0] = byte(d >> 8)
 	buf[1] = byte(d)
@@ -186,6 +224,12 @@ func writeNetworkOrderUint32(buf []byte, d uint32) {
 	buf[1] = byte(d >> 16)
 	buf[2] = byte(d >> 8)
 	buf[3] = byte(d)
+}
+func writeNetworkOrderIP(buf []byte, d net.IP) {
+	buf[0] = d[0]
+	buf[1] = d[1]
+	buf[2] = d[2]
+	buf[3] = d[3]
 }
 
 func readNetworkOrderUint16(buf []byte) (uint16, []byte) {
@@ -199,6 +243,4 @@ func readNetworkOrderUint32(buf []byte) (uint32, []byte) {
 func randomPort(start, end uint16) uint16 {
 	size := end - start + 1
 	return uint16(rand.Intn(int(size))) + start
-
-	//return uint16(rand.Intn(math.MaxUint16 + 1))
 }

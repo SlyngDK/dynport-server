@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"math"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -17,12 +18,18 @@ import (
 )
 
 type Configuration struct {
-	PortRange     string `validate:"range,required"`
-	DataDir       string `validate:"dir,required"`
-	LogLevel      string
-	LogFormat     string
-	SkipJumpCheck bool
 	CreateChains  bool
+	DataDir       string `validate:"dir,required"`
+	ExternalIP    string `validate:"omitempty,ipv4"`
+	ListenAddr    string `validate:"hostname_port,required"`
+	LogFormat     string
+	LogLevel      string
+	PortRange     string `validate:"range,required"`
+	SkipJumpCheck bool
+	ACL           struct {
+		ips   net.IPNet `validate:"cidrv4"`
+		ports string    `validate:"ports"`
+	}
 }
 
 func NewRootCommand() *cobra.Command {
@@ -38,6 +45,8 @@ func NewRootCommand() *cobra.Command {
 	}
 	rootCmd.PersistentFlags().StringP("config", "c", "config.yaml", "config file")
 	rootCmd.PersistentFlags().StringP("data-dir", "d", "/tmp/pcp", "director to use for storing data")
+	rootCmd.PersistentFlags().String("external-ip", "", "ip to report to client as external (default auto detect)")
+	rootCmd.PersistentFlags().String("listen-addr", ":5351", "address to listen on for pcp requests")
 	rootCmd.PersistentFlags().String("log-level", "INFO", "log level")
 	rootCmd.PersistentFlags().String("log-format", "json", "log format (plain/json)")
 	rootCmd.Flags().Bool("create-chains", true, "create required chains")

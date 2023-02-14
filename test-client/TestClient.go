@@ -20,10 +20,10 @@ func main() {
 	}
 	fmt.Printf("Result %v\n", result)
 
-	//response, err := client.GetExternalAddress()
-	//if err != nil {
-	//	fmt.Println(err)
-	//	return
-	//}
-	//fmt.Printf("External IP address: %v\n", response.ExternalIPAddress)
+	response, err := client.GetExternalAddress()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("External IP address: %v\n", response.ExternalIPAddress)
 }
