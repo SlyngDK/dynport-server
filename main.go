@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"net"
+	"os"
 	"time"
 )
 
@@ -34,8 +36,17 @@ type PortMappingLease struct {
 	ExternalPort uint16 `badgerhold:"unique"`
 }
 
+var config Configuration
+
 func main() {
-	logger, _ := zap.NewDevelopment()
+	if err := NewRootCommand().Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func start() {
+	logger := getLogger()
 	defer logger.Sync() // flushes buffer, if any
 
 	ipt, err := NewIPTablesManager(logger)
@@ -44,12 +55,11 @@ func main() {
 	}
 	defer ipt.Close()
 
-	if err = ipt.CheckPrerequisite(); err != nil {
+	if err = ipt.CheckPrerequisite(config.CreateChains, config.SkipJumpCheck); err != nil {
 		logger.With(zap.Error(err)).Fatal("prerequisite check failed")
 	}
 
-	dataDir := "/tmp/pcp" // TODO
-	store, err := NewDataStore(logger, dataDir)
+	store, err := NewDataStore(logger, config.DataDir)
 	if err != nil {
 		logger.With(zap.Error(err)).Fatal("failed to start datastore")
 	}

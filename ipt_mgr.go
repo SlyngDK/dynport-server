@@ -44,27 +44,43 @@ func NewIPTablesManager(l *zap.Logger) (*IPTablesManager, error) {
 	}, nil
 }
 
-func (i *IPTablesManager) CheckPrerequisite() error {
-	if ok, _ := i.ipt.ChainExists(table_filter, chain_port_mapping); !ok {
-		return fmt.Errorf("%s table is missing %s chain", table_filter, chain_port_mapping)
+func (i *IPTablesManager) CheckPrerequisite(createChains, skipJumpCheck bool) error {
+	if err := i.checkChain(table_filter, chain_port_mapping, createChains); err != nil {
+		return err
 	}
-	if ok, _ := i.ipt.ChainExists(table_nat, chain_port_mapping_postrouting); !ok {
-		return fmt.Errorf("%s table is missing %s chain", table_nat, chain_port_mapping_postrouting)
+	if err := i.checkChain(table_nat, chain_port_mapping_prerouting, createChains); err != nil {
+		return err
 	}
-	if ok, _ := i.ipt.ChainExists(table_nat, chain_port_mapping_prerouting); !ok {
-		return fmt.Errorf("%s table is missing %s chain", table_nat, chain_port_mapping_prerouting)
-	}
-
-	if ok, _ := i.jumpExist(table_filter, chain_forward, chain_port_mapping); !ok {
-		return fmt.Errorf("table %s chain %s is missing jump to %s", table_filter, chain_forward, chain_port_mapping)
-	}
-	if ok, _ := i.jumpExist(table_nat, chain_prerouting, chain_port_mapping_prerouting); !ok {
-		return fmt.Errorf("table %s chain %s is missing jump to %s", table_nat, chain_prerouting, chain_port_mapping_prerouting)
-	}
-	if ok, _ := i.jumpExist(table_nat, chain_postrouting, chain_port_mapping_postrouting); !ok {
-		return fmt.Errorf("table %s chain %s is missing jump to %s", table_nat, chain_postrouting, chain_port_mapping_postrouting)
+	if err := i.checkChain(table_nat, chain_port_mapping_postrouting, createChains); err != nil {
+		return err
 	}
 
+	if !skipJumpCheck {
+		if ok, _ := i.jumpExist(table_filter, chain_forward, chain_port_mapping); !ok {
+			return fmt.Errorf("table %s chain %s is missing jump to %s", table_filter, chain_forward, chain_port_mapping)
+		}
+		if ok, _ := i.jumpExist(table_nat, chain_prerouting, chain_port_mapping_prerouting); !ok {
+			return fmt.Errorf("table %s chain %s is missing jump to %s", table_nat, chain_prerouting, chain_port_mapping_prerouting)
+		}
+		if ok, _ := i.jumpExist(table_nat, chain_postrouting, chain_port_mapping_postrouting); !ok {
+			return fmt.Errorf("table %s chain %s is missing jump to %s", table_nat, chain_postrouting, chain_port_mapping_postrouting)
+		}
+	}
+
+	return nil
+}
+
+func (i *IPTablesManager) checkChain(table, chain string, createTables bool) error {
+	if ok, _ := i.ipt.ChainExists(table, chain); !ok {
+		if createTables {
+			err := i.ipt.NewChain(table, chain)
+			if err != nil {
+				return fmt.Errorf("failed to create chain %s %s", table, chain)
+			}
+		} else {
+			return fmt.Errorf("%s table is missing %s chain", table, chain)
+		}
+	}
 	return nil
 }
 
