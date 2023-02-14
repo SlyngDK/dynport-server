@@ -46,10 +46,21 @@ func main() {
 }
 
 func start() {
+	var err error
 	logger := getLogger()
 	defer logger.Sync() // flushes buffer, if any
 
-	ipt, err := NewIPTablesManager(logger)
+	var externalIP net.IP
+	if config.ExternalIP != "" {
+		externalIP = net.ParseIP(config.ExternalIP)
+	} else {
+		externalIP, err = GetOutboundIP()
+		if err != nil {
+			logger.With(zap.Error(err)).Fatal("failed to guess external ip")
+		}
+	}
+
+	ipt, err := NewIPTablesManager(logger, externalIP)
 	if err != nil {
 		logger.With(zap.Error(err)).Fatal("failed to create IPTablesManager")
 	}
@@ -69,11 +80,6 @@ func start() {
 
 	ipt.Reconcile()
 
-	var externalIP net.IP
-	if config.ExternalIP != "" {
-		externalIP = net.ParseIP(config.ExternalIP)
-	}
-
 	pcp, err := NewPCPServer(logger, ipt, store, config.ListenAddr, externalIP)
 	if err != nil {
 		logger.With(zap.Error(err)).Fatal("failed to create new pcp server")
@@ -84,4 +90,16 @@ func start() {
 	}
 
 	//defer pcp.Stop()
+}
+
+func GetOutboundIP() (net.IP, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	return localAddr.IP, nil
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/google/shlex"
 	"go.uber.org/zap"
 	"math/rand"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -27,9 +28,10 @@ type IPTablesManager struct {
 	ipt              *iptables.IPTables
 	reconcileCh      chan interface{}
 	reconcileCloseCh chan interface{}
+	externalIP       net.IP
 }
 
-func NewIPTablesManager(l *zap.Logger) (*IPTablesManager, error) {
+func NewIPTablesManager(l *zap.Logger, externalIP net.IP) (*IPTablesManager, error) {
 	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Sudo())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create iptables instance, %v", err)
@@ -41,6 +43,7 @@ func NewIPTablesManager(l *zap.Logger) (*IPTablesManager, error) {
 		ipt:              ipt,
 		reconcileCh:      reconcileCh,
 		reconcileCloseCh: reconcileCloseCh,
+		externalIP:       externalIP,
 	}, nil
 }
 
@@ -142,7 +145,7 @@ func (i *IPTablesManager) EnsureMappings(leases []*PortMappingLease) {
 	postFix := RandStringBytes(6)
 	i.ensureIn(table_filter, chain_port_mapping, postFix, leases, forwardRule)
 	i.ensureIn(table_nat, chain_port_mapping_prerouting, postFix, leases, preroutingRule)
-	i.ensureIn(table_nat, chain_port_mapping_postrouting, postFix, leases, postroutingRule)
+	i.ensureIn(table_nat, chain_port_mapping_postrouting, postFix, leases, i.postroutingRule)
 
 }
 
@@ -152,7 +155,8 @@ func forwardRule(lease *PortMappingLease) []string {
 		"-p", lease.Protocol.String(),
 		"-m", lease.Protocol.String(), "--dport", strconv.Itoa(int(lease.ClientPort)),
 		"-m", "comment", "--comment", lease.Id.String(),
-		"-j", "ACCEPT"}
+		"-j", "ACCEPT",
+	}
 }
 
 func preroutingRule(lease *PortMappingLease) []string {
@@ -160,16 +164,18 @@ func preroutingRule(lease *PortMappingLease) []string {
 		"-p", lease.Protocol.String(),
 		"-m", lease.Protocol.String(), "--dport", strconv.Itoa(int(lease.ExternalPort)),
 		"-m", "comment", "--comment", lease.Id.String(),
-		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", lease.ClientIP, lease.ClientPort)}
+		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", lease.ClientIP, lease.ClientPort),
+	}
 }
 
-func postroutingRule(lease *PortMappingLease) []string {
+func (i *IPTablesManager) postroutingRule(lease *PortMappingLease) []string {
 	return []string{
 		"-s", lease.ClientIP.String(),
 		"-p", lease.Protocol.String(),
 		"-m", lease.Protocol.String(), "--sport", strconv.Itoa(int(lease.ClientPort)),
 		"-m", "comment", "--comment", lease.Id.String(),
-		"-j", "MASQUERADE", "--to-ports", strconv.Itoa(int(lease.ExternalPort))}
+		"-j", "SNAT", "--to-source", fmt.Sprintf("%s:%d", i.externalIP.To4().String(), lease.ExternalPort),
+	}
 }
 
 func (i *IPTablesManager) ensureIn(table, chainBase, postFix string, leases []*PortMappingLease, fn func(*PortMappingLease) []string) error {

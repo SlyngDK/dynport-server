@@ -21,13 +21,6 @@ type PCPServer struct {
 
 func NewPCPServer(l *zap.Logger, ipt *IPTablesManager, store *DataStore, listenAddr string, externalIP net.IP) (*PCPServer, error) {
 	p := &PCPServer{l: l.Sugar(), ipt: ipt, store: store, listenAddr: listenAddr, externalIP: externalIP}
-	if p.externalIP.IsUnspecified() || p.externalIP == nil {
-		outboundIP, err := p.GetOutboundIP()
-		if err != nil {
-			return nil, fmt.Errorf("failed to auto detect outbound ip: %v", err)
-		}
-		p.externalIP = outboundIP.To4()
-	}
 	return p, nil
 }
 
@@ -203,17 +196,6 @@ func (p *PCPServer) Stop() error {
 }
 
 // Get preferred outbound ip of this machine
-func (p *PCPServer) GetOutboundIP() (net.IP, error) {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-
-	return localAddr.IP, nil
-}
 
 func writeNetworkOrderUint16(buf []byte, d uint16) {
 	buf[0] = byte(d >> 8)
