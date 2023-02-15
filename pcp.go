@@ -6,21 +6,41 @@ import (
 	"go.uber.org/zap"
 	"math/rand"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 )
 
 type PCPServer struct {
-	conn       net.PacketConn
-	externalIP net.IP
-	ipt        *IPTablesManager
-	l          *zap.SugaredLogger
-	listenAddr string
-	started    time.Time
-	store      *DataStore
+	conn         net.PacketConn
+	externalIP   net.IP
+	ipt          *IPTablesManager
+	l            *zap.SugaredLogger
+	listenAddr   string
+	started      time.Time
+	store        *DataStore
+	acl          []ACLConfiguration
+	allowDefault bool
 }
 
-func NewPCPServer(l *zap.Logger, ipt *IPTablesManager, store *DataStore, listenAddr string, externalIP net.IP) (*PCPServer, error) {
-	p := &PCPServer{l: l.Sugar(), ipt: ipt, store: store, listenAddr: listenAddr, externalIP: externalIP}
+func NewPCPServer(
+	l *zap.Logger,
+	ipt *IPTablesManager,
+	store *DataStore,
+	listenAddr string,
+	externalIP net.IP,
+	acl []ACLConfiguration,
+	allowDefault bool,
+) (*PCPServer, error) {
+	p := &PCPServer{
+		l:            l.Sugar(),
+		ipt:          ipt,
+		store:        store,
+		listenAddr:   listenAddr,
+		externalIP:   externalIP,
+		acl:          acl,
+		allowDefault: allowDefault,
+	}
 	return p, nil
 }
 
@@ -132,48 +152,75 @@ func (p *PCPServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf []byt
 		protocol = TCP
 	}
 
-	lease, err := p.store.GetLeaseByIpAndPort(clientIP, internalPort, protocol)
-	if err != nil {
-		return fmt.Errorf("error getting existing lease %v", err)
+	// Check ACL
+	allowed := p.allowDefault
+	if p.acl != nil {
+		p.l.Debugf("Checking ACL for request from %s for %d", clientIP.String(), internalPort)
+		for _, a := range p.acl {
+			_, ipNet, err := net.ParseCIDR(a.CIDR)
+			if err != nil {
+				p.l.With(zap.Error(err)).Warnf("failed to parse cidr %s", a.CIDR)
+				continue
+			}
+			if ipNet.Contains(clientIP) && isPortInRange(internalPort, a.InternalPorts) {
+				allowed = !a.Deny
+				if allowed {
+					break
+				}
+			}
+		}
 	}
-	if lease == nil {
-		start := uint16(10000)
-		end := uint16(10999)
-		externalPort = randomPort(start, end) //TODO
-		for i := 0; i < 10; i++ {
-			if !p.store.IsExternalPortInUse(externalPort) {
-				break
-			}
-			if i == 9 {
-				return fmt.Errorf("no port is free")
-			}
+
+	resultCode := 0
+	if allowed {
+
+		lease, err := p.store.GetLeaseByIpAndPort(clientIP, internalPort, protocol)
+		if err != nil {
+			return fmt.Errorf("error getting existing lease %v", err)
+		}
+		if lease == nil {
+			start := uint16(10000)
+			end := uint16(10999)
 			externalPort = randomPort(start, end)
+			for i := 0; i < 10; i++ {
+				if !p.store.IsExternalPortInUse(externalPort) {
+					break
+				}
+				if i == 9 {
+					return fmt.Errorf("no port is free")
+				}
+				externalPort = randomPort(start, end)
+			}
+
+			lease = &PortMappingLease{
+				Id:           uuid.New(),
+				Created:      time.Now(),
+				LastSeen:     time.Now(),
+				ClientIP:     clientIP,
+				ClientPort:   internalPort,
+				Protocol:     protocol,
+				ExternalPort: externalPort,
+			}
 		}
-
-		lease = &PortMappingLease{
-			Id:           uuid.New(),
-			Created:      time.Now(),
-			LastSeen:     time.Now(),
-			ClientIP:     clientIP,
-			ClientPort:   internalPort,
-			Protocol:     protocol,
-			ExternalPort: externalPort,
+		lease.LastSeen = time.Now()
+		err = p.store.UpsertLease(lease)
+		if err != nil {
+			return fmt.Errorf("failed to upsert new lease %v", err)
 		}
-	}
-	lease.LastSeen = time.Now()
-	err = p.store.UpsertLease(lease)
-	if err != nil {
-		return fmt.Errorf("failed to upsert new lease %v", err)
-	}
-	externalPort = lease.ExternalPort
+		externalPort = lease.ExternalPort
 
-	p.ipt.Reconcile()
+		p.ipt.Reconcile()
 
-	p.l.Debugf("received port-mapping request from %s for port %d", addr.String(), internalPort)
+		p.l.Debugf("created mapping request for %s internalPort %d, externalPort %d with lifetime %d", clientIP.String(), internalPort, externalPort, lifetime)
+	} else {
+		p.l.Warnf("port-mapping is not allowed from %s for %d", clientIP.String(), internalPort)
+		resultCode = 2
+	}
 
 	res := make([]byte, 16)
 	res[1] = 128 + op // Response op code
 	// 2 byte result code
+	res[3] = byte(resultCode)
 	sec := time.Now().Unix() - p.started.Unix()
 	writeNetworkOrderUint32(res[4:8], uint32(sec)) // Seconds Since Start of Epoch
 	writeNetworkOrderUint16(res[8:10], internalPort)
@@ -195,7 +242,18 @@ func (p *PCPServer) Stop() error {
 	return nil
 }
 
-// Get preferred outbound ip of this machine
+func isPortInRange(port uint16, portRange string) bool {
+	r := strings.Split(portRange, "-")
+	start, err := strconv.Atoi(r[0])
+	if err != nil {
+		return false
+	}
+	end, err := strconv.Atoi(r[1])
+	if err != nil {
+		return false
+	}
+	return int(port) >= start && int(port) <= end
+}
 
 func writeNetworkOrderUint16(buf []byte, d uint16) {
 	buf[0] = byte(d >> 8)

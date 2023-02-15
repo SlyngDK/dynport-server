@@ -80,7 +80,7 @@ func start() {
 
 	ipt.Reconcile()
 
-	pcp, err := NewPCPServer(logger, ipt, store, config.ListenAddr, externalIP)
+	pcp, err := NewPCPServer(logger, ipt, store, config.ListenAddr, externalIP, config.ACL, config.ACLAllowDefault)
 	if err != nil {
 		logger.With(zap.Error(err)).Fatal("failed to create new pcp server")
 	}
@@ -88,8 +88,6 @@ func start() {
 	if err != nil {
 		logger.With(zap.Error(err)).Error("failed to start pcp server")
 	}
-
-	//defer pcp.Stop()
 }
 
 func GetOutboundIP() (net.IP, error) {

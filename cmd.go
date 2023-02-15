@@ -10,26 +10,28 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"math"
-	"net"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
+type ACLConfiguration struct {
+	CIDR          string `validate:"cidrv4,required"`
+	InternalPorts string `validate:"range,required"`
+	Deny          bool
+}
 type Configuration struct {
-	CreateChains  bool
-	DataDir       string `validate:"dir,required"`
-	ExternalIP    string `validate:"omitempty,ipv4"`
-	ListenAddr    string `validate:"hostname_port,required"`
-	LogFormat     string
-	LogLevel      string
-	PortRange     string `validate:"range,required"`
-	SkipJumpCheck bool
-	ACL           struct {
-		ips   net.IPNet `validate:"cidrv4"`
-		ports string    `validate:"ports"`
-	}
+	ACLAllowDefault bool
+	CreateChains    bool
+	DataDir         string `validate:"dir,required"`
+	ExternalIP      string `validate:"omitempty,ipv4"`
+	ListenAddr      string `validate:"hostname_port,required"`
+	LogFormat       string
+	LogLevel        string
+	PortRange       string `validate:"range,required"`
+	SkipJumpCheck   bool
+	ACL             []ACLConfiguration
 }
 
 func NewRootCommand() *cobra.Command {
@@ -51,6 +53,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().String("log-format", "json", "log format (plain/json)")
 	rootCmd.Flags().Bool("create-chains", true, "create required chains")
 	rootCmd.Flags().Bool("skip-jump-check", false, "disable check of rule pointing to chains")
+	rootCmd.Flags().Bool("acl-allow-default", false, "default allow port mappings")
 	rootCmd.Flags().String("port-range", "10000-19999", "external port range to allocate from")
 	return rootCmd
 }
