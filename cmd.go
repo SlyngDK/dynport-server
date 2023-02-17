@@ -22,16 +22,19 @@ type ACLConfiguration struct {
 	Deny          bool
 }
 type Configuration struct {
-	ACLAllowDefault bool
-	CreateChains    bool
-	DataDir         string `validate:"dir,required"`
-	ExternalIP      string `validate:"omitempty,ipv4"`
-	ListenAddr      string `validate:"hostname_port,required"`
-	LogFormat       string
-	LogLevel        string
-	PortRange       string `validate:"range,required"`
-	SkipJumpCheck   bool
-	ACL             []ACLConfiguration
+	ACLAllowDefault       bool
+	CreateChains          bool
+	DataDir               string `validate:"dir,required"`
+	ExternalIP            string `validate:"omitempty,ipv4"`
+	ListenAddr            string `validate:"hostname_port,required"`
+	LogFormat             string
+	LogLevel              string
+	PortRange             string `validate:"range,required"`
+	SkipJumpCheck         bool
+	ACL                   []ACLConfiguration
+	ReplicationListenAddr string `validate:"omitempty,hostname_port"`
+	ReplicationSecret     string
+	ReplicationPeers      []string
 }
 
 func NewRootCommand() *cobra.Command {
@@ -47,14 +50,16 @@ func NewRootCommand() *cobra.Command {
 	}
 	rootCmd.PersistentFlags().StringP("config", "c", "config.yaml", "config file")
 	rootCmd.PersistentFlags().StringP("data-dir", "d", "/tmp/pcp", "director to use for storing data")
-	rootCmd.PersistentFlags().String("external-ip", "", "ip to report to client as external (default auto detect)")
-	rootCmd.PersistentFlags().String("listen-addr", ":5351", "address to listen on for pcp requests")
 	rootCmd.PersistentFlags().String("log-level", "INFO", "log level")
 	rootCmd.PersistentFlags().String("log-format", "json", "log format (plain/json)")
+	rootCmd.Flags().String("external-ip", "", "ip to report to client as external (default auto detect)")
+	rootCmd.Flags().String("listen-addr", ":5351", "address to listen on for pcp requests")
 	rootCmd.Flags().Bool("create-chains", true, "create required chains")
 	rootCmd.Flags().Bool("skip-jump-check", false, "disable check of rule pointing to chains")
 	rootCmd.Flags().Bool("acl-allow-default", false, "default allow port mappings")
 	rootCmd.Flags().String("port-range", "10000-19999", "external port range to allocate from")
+	rootCmd.Flags().String("replication-listen-addr", "", "enable and listen for replication requests")
+	rootCmd.Flags().StringSlice("replication-peers", []string{}, "peers to replicate with `x.x.x.x:8080`")
 	return rootCmd
 }
 func initializeConfig(cmd *cobra.Command) error {

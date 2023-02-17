@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/shlex"
 	"go.uber.org/zap"
 	"math/rand"
@@ -151,10 +152,10 @@ func (i *IPTablesManager) EnsureMappings(leases []*PortMappingLease) {
 
 func forwardRule(lease *PortMappingLease) []string {
 	return []string{
-		"-d", lease.ClientIP.String(),
+		"-d", fmt.Sprintf("%s/32", lease.ClientIP.String()),
 		"-p", lease.Protocol.String(),
 		"-m", lease.Protocol.String(), "--dport", strconv.Itoa(int(lease.ClientPort)),
-		"-m", "comment", "--comment", lease.Id.String(),
+		"-m", "comment", "--comment", lease.Id,
 		"-j", "ACCEPT",
 	}
 }
@@ -163,23 +164,36 @@ func preroutingRule(lease *PortMappingLease) []string {
 	return []string{
 		"-p", lease.Protocol.String(),
 		"-m", lease.Protocol.String(), "--dport", strconv.Itoa(int(lease.ExternalPort)),
-		"-m", "comment", "--comment", lease.Id.String(),
+		"-m", "comment", "--comment", lease.Id,
 		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", lease.ClientIP, lease.ClientPort),
 	}
 }
 
 func (i *IPTablesManager) postroutingRule(lease *PortMappingLease) []string {
 	return []string{
-		"-s", lease.ClientIP.String(),
+		"-s", fmt.Sprintf("%s/32", lease.ClientIP.String()),
 		"-p", lease.Protocol.String(),
 		"-m", lease.Protocol.String(), "--sport", strconv.Itoa(int(lease.ClientPort)),
-		"-m", "comment", "--comment", lease.Id.String(),
+		"-m", "comment", "--comment", lease.Id,
 		"-j", "SNAT", "--to-source", fmt.Sprintf("%s:%d", i.externalIP.To4().String(), lease.ExternalPort),
 	}
 }
 
 func (i *IPTablesManager) ensureIn(table, chainBase, postFix string, leases []*PortMappingLease, fn func(*PortMappingLease) []string) error {
 	chain := chainBase + "-" + postFix
+
+	// Generate rules
+	newRules := make([][]string, 0)
+	for _, lease := range leases {
+		newRules = append(newRules, fn(lease))
+	}
+	currentRules := i.listCurrentChain(table, chainBase)
+
+	if cmp.Diff(newRules, currentRules) == "" {
+		i.l.Debugf("no new changes to chain %s %s", table, chain)
+		return nil
+	}
+
 	if ok, _ := i.ipt.ChainExists(table, chain); ok {
 		err := i.ipt.ClearChain(table, chain)
 		if err != nil {
@@ -191,11 +205,9 @@ func (i *IPTablesManager) ensureIn(table, chainBase, postFix string, leases []*P
 			return err
 		}
 	}
-	for _, lease := range leases {
-		args := fn(lease)
-
-		if err := i.ipt.AppendUnique(table, chain, args...); err != nil {
-			i.l.With(zap.Error(err)).Errorf("failed to ensure rule %s", args)
+	for _, rule := range newRules {
+		if err := i.ipt.AppendUnique(table, chain, rule...); err != nil {
+			i.l.With(zap.Error(err)).Errorf("failed to ensure rule %s", rule)
 			continue
 		}
 	}
@@ -203,6 +215,36 @@ func (i *IPTablesManager) ensureIn(table, chainBase, postFix string, leases []*P
 	i.setActiveChain(table, chainBase, postFix)
 
 	return nil
+}
+
+func (i *IPTablesManager) listCurrentChain(table, chain string) [][]string {
+	list, err := i.ipt.List(table, chain)
+	if err != nil {
+		i.l.With(zap.Error(err)).Error("failed to list chain")
+		return nil
+	}
+	rules2 := rulesToArgs(list)
+	if len(rules2) != 1 {
+		return nil
+	}
+	currentChain := ""
+	for j, r := range rules2[0] {
+		if r == "-j" {
+			currentChain = rules2[0][j+1]
+			break
+		}
+	}
+	if currentChain == "" {
+		return nil
+	}
+
+	list, err = i.ipt.List(table, currentChain)
+	if err != nil {
+		i.l.With(zap.Error(err)).Error("failed to list chain")
+		return nil
+	}
+
+	return rulesToArgs(list)
 }
 
 func (i *IPTablesManager) setActiveChain(table, chainBase, postFix string) {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"net"
 	"os"
@@ -27,7 +26,7 @@ func (p PROTOCOL) String() string {
 }
 
 type PortMappingLease struct {
-	Id           uuid.UUID `badgerhold:"unique"`
+	Id           string `badgerhold:"unique"`
 	Created      time.Time
 	LastSeen     time.Time
 	ClientIP     net.IP
@@ -49,6 +48,10 @@ func start() {
 	var err error
 	logger := getLogger()
 	defer logger.Sync() // flushes buffer, if any
+
+	if config.ReplicationListenAddr != "" && config.ReplicationSecret == "" {
+		logger.Fatal("you have enabled replication, but not specified a replication secret")
+	}
 
 	var externalIP net.IP
 	if config.ExternalIP != "" {
@@ -80,10 +83,26 @@ func start() {
 
 	ipt.Reconcile()
 
+	replication := NewReplication(logger, store, config.ReplicationListenAddr, config.ReplicationSecret, config.ReplicationPeers)
+	replication.Start()
+	go replication.RunFullSync()
+
+	go func() {
+		t := time.NewTimer(5 * time.Minute)
+		for {
+			select {
+			case <-t.C:
+				replication.RunFullSync()
+				ipt.Reconcile()
+			}
+		}
+	}()
+
 	pcp, err := NewPCPServer(logger, ipt, store, config.ListenAddr, externalIP, config.ACL, config.ACLAllowDefault)
 	if err != nil {
 		logger.With(zap.Error(err)).Fatal("failed to create new pcp server")
 	}
+	pcp.RegisterListener(replication.PortMappingLeaseListener)
 	err = pcp.Start()
 	if err != nil {
 		logger.With(zap.Error(err)).Error("failed to start pcp server")

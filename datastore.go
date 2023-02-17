@@ -1,8 +1,8 @@
 package main
 
 import (
+	"crypto/md5"
 	"fmt"
-	"github.com/google/uuid"
 	"github.com/timshannon/badgerhold"
 	"go.uber.org/zap"
 	"net"
@@ -67,11 +67,14 @@ func (d *DataStore) UpsertLease(lease *PortMappingLease) error {
 	if len(leases) == 0 {
 		return d.store.Insert(lease.Id, lease)
 	}
+	if leases[0].LastSeen.After(lease.LastSeen) {
+		return nil
+	}
 	leases[0].LastSeen = lease.LastSeen
 	return d.store.Update(lease.Id, leases[0])
 }
 
-func (d *DataStore) GetLeaseById(id uuid.UUID) (*PortMappingLease, error) {
+func (d *DataStore) GetLeaseById(id string) (*PortMappingLease, error) {
 	l := &PortMappingLease{}
 	err := d.store.Get(id, l)
 	return nil, err
@@ -104,4 +107,14 @@ func (d *DataStore) IsExternalPortInUse(port uint16) bool {
 		return true
 	}
 	return len(leases) > 0
+}
+
+func leaseHash(protocol PROTOCOL, clientIP net.IP, internalPort uint16) string {
+	data := make([]byte, 0)
+	data = append(data, []byte(protocol.String())...)
+	data = append(data, 0)
+	data = append(data, []byte(clientIP.To16().String())...)
+	data = append(data, 0)
+	data = append(data, []byte(string(internalPort))...)
+	return fmt.Sprintf("%x", md5.Sum(data))
 }

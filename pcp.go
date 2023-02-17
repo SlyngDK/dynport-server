@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"math/rand"
 	"net"
@@ -21,6 +20,7 @@ type PCPServer struct {
 	store        *DataStore
 	acl          []ACLConfiguration
 	allowDefault bool
+	listeners    []func(lease PortMappingLease)
 }
 
 func NewPCPServer(
@@ -193,7 +193,7 @@ func (p *PCPServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf []byt
 			}
 
 			lease = &PortMappingLease{
-				Id:           uuid.New(),
+				Id:           leaseHash(protocol, clientIP, internalPort),
 				Created:      time.Now(),
 				LastSeen:     time.Now(),
 				ClientIP:     clientIP,
@@ -208,6 +208,10 @@ func (p *PCPServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf []byt
 			return fmt.Errorf("failed to upsert new lease %v", err)
 		}
 		externalPort = lease.ExternalPort
+
+		for _, listener := range p.listeners {
+			go listener(*lease)
+		}
 
 		p.ipt.Reconcile()
 
@@ -240,6 +244,10 @@ func (p *PCPServer) Stop() error {
 		return err
 	}
 	return nil
+}
+
+func (p *PCPServer) RegisterListener(fn func(lease PortMappingLease)) {
+	p.listeners = append(p.listeners, fn)
 }
 
 func isPortInRange(port uint16, portRange string) bool {
