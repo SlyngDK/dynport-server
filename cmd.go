@@ -39,7 +39,7 @@ type Configuration struct {
 
 func NewRootCommand() *cobra.Command {
 	var rootCmd = &cobra.Command{
-		Use: "pcp-server",
+		Use: "dynport-server",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// You can bind cobra and viper in a few locations, but PersistencePreRunE on the root command works well
 			return initializeConfig(cmd)
@@ -49,11 +49,11 @@ func NewRootCommand() *cobra.Command {
 		},
 	}
 	rootCmd.PersistentFlags().StringP("config", "c", "config.yaml", "config file")
-	rootCmd.PersistentFlags().StringP("data-dir", "d", "/tmp/pcp", "director to use for storing data")
+	rootCmd.PersistentFlags().StringP("data-dir", "d", "/tmp/dynport", "director to use for storing data")
 	rootCmd.PersistentFlags().String("log-level", "INFO", "log level")
 	rootCmd.PersistentFlags().String("log-format", "json", "log format (plain/json)")
 	rootCmd.Flags().String("external-ip", "", "ip to report to client as external (default auto detect)")
-	rootCmd.Flags().String("listen-addr", ":5351", "address to listen on for pcp requests")
+	rootCmd.Flags().String("listen-addr", ":5351", "address to listen on for nat-pmp requests")
 	rootCmd.Flags().Bool("create-chains", true, "create required chains")
 	rootCmd.Flags().Bool("skip-jump-check", false, "disable check of rule pointing to chains")
 	rootCmd.Flags().Bool("acl-allow-default", false, "default allow port mappings")
@@ -80,7 +80,7 @@ func initializeConfig(cmd *cobra.Command) error {
 		}
 	}
 
-	vp.SetEnvPrefix("PCP")
+	vp.SetEnvPrefix("DP")
 	vp.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	vp.AutomaticEnv()
 
@@ -129,7 +129,7 @@ func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 
 		v.RegisterAlias(strings.ReplaceAll(f.Name, "-", "_"), configName)
 
-		v.BindEnv(configName, "PCP_"+strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_")))
+		v.BindEnv(configName, "DP_"+strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_")))
 
 		v.SetDefault(configName, f.DefValue)
 

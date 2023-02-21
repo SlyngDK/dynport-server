@@ -1,4 +1,4 @@
 .idea/
 *.iml
-pcp-server
+dynport-server
 test-client/test-client

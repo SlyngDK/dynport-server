@@ -1,4 +1,4 @@
-module pcp-server
+module dynport-server
 
 go 1.20
 

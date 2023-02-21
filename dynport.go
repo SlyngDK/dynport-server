@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-type PCPServer struct {
+type DynPortServer struct {
 	conn         net.PacketConn
 	externalIP   net.IP
 	ipt          *IPTablesManager
@@ -23,7 +23,7 @@ type PCPServer struct {
 	listeners    []func(lease PortMappingLease)
 }
 
-func NewPCPServer(
+func NewDynPortServer(
 	l *zap.Logger,
 	ipt *IPTablesManager,
 	store *DataStore,
@@ -31,8 +31,8 @@ func NewPCPServer(
 	externalIP net.IP,
 	acl []ACLConfiguration,
 	allowDefault bool,
-) (*PCPServer, error) {
-	p := &PCPServer{
+) (*DynPortServer, error) {
+	p := &DynPortServer{
 		l:            l.Sugar(),
 		ipt:          ipt,
 		store:        store,
@@ -44,7 +44,7 @@ func NewPCPServer(
 	return p, nil
 }
 
-func (p *PCPServer) Start() error {
+func (p *DynPortServer) Start() error {
 	p.started = time.Now()
 	var err error
 	p.conn, err = net.ListenPacket("udp4", p.listenAddr)
@@ -75,7 +75,7 @@ func (p *PCPServer) Start() error {
 	return nil
 }
 
-func (p *PCPServer) handleRequest(addr net.Addr, buf []byte) error {
+func (p *DynPortServer) handleRequest(addr net.Addr, buf []byte) error {
 	if len(buf) >= 1 && buf[0] == 0 {
 		// Version 0
 		err := p.handleNATPMPRequest(addr, buf)
@@ -86,7 +86,7 @@ func (p *PCPServer) handleRequest(addr net.Addr, buf []byte) error {
 	return fmt.Errorf("unsupported version")
 }
 
-func (p *PCPServer) handleNATPMPRequest(addr net.Addr, buf []byte) error {
+func (p *DynPortServer) handleNATPMPRequest(addr net.Addr, buf []byte) error {
 	if len(buf) >= 2 {
 		switch buf[1] {
 		case 0:
@@ -107,7 +107,7 @@ func (p *PCPServer) handleNATPMPRequest(addr net.Addr, buf []byte) error {
 	return nil
 }
 
-func (p *PCPServer) responseWithErrorResultCode(addr net.Addr, code uint16) {
+func (p *DynPortServer) responseWithErrorResultCode(addr net.Addr, code uint16) {
 	res := make([]byte, 8)
 	sec := time.Now().Unix() - p.started.Unix()
 	writeNetworkOrderUint16(res[2:4], code)
@@ -117,7 +117,7 @@ func (p *PCPServer) responseWithErrorResultCode(addr net.Addr, code uint16) {
 	}
 }
 
-func (p *PCPServer) handleNATPMPExternalAddressRequest(addr net.Addr) error {
+func (p *DynPortServer) handleNATPMPExternalAddressRequest(addr net.Addr) error {
 	res := make([]byte, 12)
 	res[1] = 128 + 0 // Response op code
 	// 2 byte result code
@@ -130,7 +130,7 @@ func (p *PCPServer) handleNATPMPExternalAddressRequest(addr net.Addr) error {
 	}
 	return nil
 }
-func (p *PCPServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf []byte) error {
+func (p *DynPortServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf []byte) error {
 	internalPort, buf := readNetworkOrderUint16(buf)
 	externalPort, buf := readNetworkOrderUint16(buf)
 	lifetime, buf := readNetworkOrderUint32(buf)
@@ -237,7 +237,7 @@ func (p *PCPServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf []byt
 	return nil
 }
 
-func (p *PCPServer) Stop() error {
+func (p *DynPortServer) Stop() error {
 	if p.conn != nil {
 		err := p.conn.Close()
 		p.conn = nil
@@ -246,7 +246,7 @@ func (p *PCPServer) Stop() error {
 	return nil
 }
 
-func (p *PCPServer) RegisterListener(fn func(lease PortMappingLease)) {
+func (p *DynPortServer) RegisterListener(fn func(lease PortMappingLease)) {
 	p.listeners = append(p.listeners, fn)
 }
 
