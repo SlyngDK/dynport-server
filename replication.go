@@ -25,6 +25,7 @@ type Replication struct {
 	listenAddr string
 	peers      []string
 	secret     string
+	listeners  []func()
 }
 
 func NewReplication(l *zap.Logger, store *DataStore, listenAddr, secret string, peers []string) *Replication {
@@ -54,6 +55,16 @@ func (r *Replication) Start() {
 			r.l.With(zap.Error(err)).Error("failed to start gin")
 		}
 	}()
+}
+
+func (r *Replication) RegisterUpdateListener(fn func()) {
+	r.listeners = append(r.listeners, fn)
+}
+
+func (r *Replication) sendUpdate() {
+	for _, fn := range r.listeners {
+		go fn()
+	}
 }
 
 func (r *Replication) RunFullSync() {
@@ -95,6 +106,7 @@ func (r *Replication) RunFullSync() {
 			}
 		}
 	}
+	r.sendUpdate()
 }
 
 func (r *Replication) setupHandlers() {
@@ -130,6 +142,7 @@ func (r *Replication) setupHandlers() {
 			c.AbortWithStatus(500)
 			return
 		}
+		r.sendUpdate()
 	})
 }
 

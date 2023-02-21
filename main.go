@@ -84,16 +84,17 @@ func start() {
 	ipt.Reconcile()
 
 	replication := NewReplication(logger, store, config.ReplicationListenAddr, config.ReplicationSecret, config.ReplicationPeers)
+	replication.RegisterUpdateListener(ipt.Reconcile)
 	replication.Start()
-	go replication.RunFullSync()
 
 	go func() {
+		replication.RunFullSync()
+
 		t := time.NewTimer(5 * time.Minute)
 		for {
 			select {
 			case <-t.C:
 				replication.RunFullSync()
-				ipt.Reconcile()
 			}
 		}
 	}()
