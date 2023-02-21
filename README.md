@@ -1,4 +1,4 @@
-#Dynamic Port Forward Server
+# Dynamic Port Forward Server
 
 This is a simple server receiving nat-pmp request for opening/forwarding ports in iptables. There is support for replication of leases between servers, when running HA firewall, and want the samme rules on both servers.
 
