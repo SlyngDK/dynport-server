@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - '*'
+  release:
+    types: [published, created, prereleased, released, edited]
 
 permissions:
   contents: write
@@ -41,6 +40,7 @@ jobs:
         with:
           hash-type: sha256
           file-name:  SHASUM256.txt
+          get-assets: true
 
       - uses: actions/upload-artifact@v2
         with:
