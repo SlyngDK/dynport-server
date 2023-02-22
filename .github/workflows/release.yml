@@ -20,13 +20,12 @@ jobs:
 
       - name: Install dependencies
         run: go get .
+
       - name: Build
-        run: go build -v ./...
+        run: CGO_ENABLED=0 go build ./...
 
       - name: Test
         run: go test -v ./...
-
-      - run: ls -lah
 
       - name: Release
         uses: softprops/action-gh-release@v1
