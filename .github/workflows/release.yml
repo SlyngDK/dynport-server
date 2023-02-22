@@ -26,6 +26,8 @@ jobs:
       - name: Test
         run: go test -v ./...
 
+      - run: ls -lah
+
       - name: Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
