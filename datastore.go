@@ -115,6 +115,6 @@ func leaseHash(protocol PROTOCOL, clientIP net.IP, internalPort uint16) string {
 	data = append(data, 0)
 	data = append(data, []byte(clientIP.To16().String())...)
 	data = append(data, 0)
-	data = append(data, []byte(string(internalPort))...)
+	data = append(data, []byte(fmt.Sprintf("%d", internalPort))...)
 	return fmt.Sprintf("%x", md5.Sum(data))
 }
