@@ -5,6 +5,8 @@ import (
 	"go.uber.org/zap"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -99,10 +101,21 @@ func start() {
 		}
 	}()
 
-	dynPortServer, err := NewDynPortServer(logger, ipt, store, config.ListenAddr, externalIP, config.ACL, config.ACLAllowDefault)
+	dynPortServer, err := NewDynPortServer(logger, ipt, store, config.ListenAddrs, externalIP, config.ACL, config.ACLAllowDefault)
 	if err != nil {
 		logger.With(zap.Error(err)).Fatal("failed to create new dynPortServer server")
 	}
+
+	signalChannel := make(chan os.Signal)
+	signal.Notify(signalChannel, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-signalChannel:
+			logger.Info("shutting down")
+			dynPortServer.Stop()
+		}
+	}()
+
 	dynPortServer.RegisterListener(replication.PortMappingLeaseListener)
 	err = dynPortServer.Start()
 	if err != nil {

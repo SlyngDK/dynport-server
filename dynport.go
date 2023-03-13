@@ -5,17 +5,19 @@ import (
 	"go.uber.org/zap"
 	"math/rand"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type DynPortServer struct {
-	conn         net.PacketConn
+	conns        []net.PacketConn
 	externalIP   net.IP
 	ipt          *IPTablesManager
 	l            *zap.SugaredLogger
-	listenAddr   string
+	listenAddrs  []string
 	started      time.Time
 	store        *DataStore
 	acl          []ACLConfiguration
@@ -27,16 +29,26 @@ func NewDynPortServer(
 	l *zap.Logger,
 	ipt *IPTablesManager,
 	store *DataStore,
-	listenAddr string,
+	listenAddrs []string,
 	externalIP net.IP,
 	acl []ACLConfiguration,
 	allowDefault bool,
 ) (*DynPortServer, error) {
+	for _, a := range listenAddrs {
+		addrPort, err := netip.ParseAddrPort(a)
+		if err != nil {
+			return nil, err
+		}
+		if !addrPort.IsValid() || addrPort.Addr().IsUnspecified() || addrPort.Addr().IsMulticast() {
+			return nil, fmt.Errorf("listenAddr needs to be specific ip: %s", a)
+		}
+	}
+
 	p := &DynPortServer{
 		l:            l.Sugar(),
 		ipt:          ipt,
 		store:        store,
-		listenAddr:   listenAddr,
+		listenAddrs:  listenAddrs,
 		externalIP:   externalIP,
 		acl:          acl,
 		allowDefault: allowDefault,
@@ -46,91 +58,106 @@ func NewDynPortServer(
 
 func (p *DynPortServer) Start() error {
 	p.started = time.Now()
-	var err error
-	p.conn, err = net.ListenPacket("udp4", p.listenAddr)
-	if err != nil {
-		return fmt.Errorf("failed to listen for udp4 on `%s`: %v", p.listenAddr, err)
+	for _, addr := range p.listenAddrs {
+		conn, err := net.ListenPacket("udp4", addr)
+		if err != nil {
+			return fmt.Errorf("failed to listen for udp4 on `%s`: %v", addr, err)
+		}
+		p.conns = append(p.conns, conn)
 	}
 
-	func() {
-		for {
-			buf := make([]byte, 1500)
-			n, addr, err := p.conn.ReadFrom(buf)
-			if n > 0 {
-				p.l.Debugf("received %d bytes from %s", n, addr)
+	var wg sync.WaitGroup
 
-				err = p.handleRequest(addr, buf[0:n])
-				if err != nil {
-					p.l.With(zap.Error(err)).Errorf("failed to handle request from %s", addr)
+	for _, conn := range p.conns {
+		wg.Add(1)
+		go func(conn net.PacketConn) {
+			for {
+				buf := make([]byte, 1500)
+				p.l.Debugf("read from %s", conn.LocalAddr())
+				n, addr, err := conn.ReadFrom(buf)
+				if n > 0 {
+					p.l.Debugf("received %d bytes from %s", n, addr)
+
+					err = p.handleRequest(conn, addr, buf[0:n])
+					if err != nil {
+						p.l.With(zap.Error(err)).Errorf("failed to handle request from %s", addr)
+						continue
+					}
+
 					continue
+				} else if err != nil {
+					if strings.Contains(err.Error(), "use of closed network connection") {
+						p.l.With(zap.Error(err)).Debugf("failed to read")
+					} else {
+						p.l.With(zap.Error(err)).Errorf("failed to read")
+					}
+					wg.Done()
+					return
 				}
-
-				continue
-			} else if err != nil {
-				p.l.With(zap.Error(err)).Errorf("failed to read")
-				return
 			}
-		}
-	}()
+		}(conn)
+	}
+
+	wg.Wait()
 	return nil
 }
 
-func (p *DynPortServer) handleRequest(addr net.Addr, buf []byte) error {
+func (p *DynPortServer) handleRequest(conn net.PacketConn, addr net.Addr, buf []byte) error {
 	if len(buf) >= 1 && buf[0] == 0 {
 		// Version 0
-		err := p.handleNATPMPRequest(addr, buf)
+		err := p.handleNATPMPRequest(conn, addr, buf)
 		return err
 	}
 	// Respond with Unsupported Version
-	p.responseWithErrorResultCode(addr, 1)
+	p.responseWithErrorResultCode(conn, addr, 1)
 	return fmt.Errorf("unsupported version")
 }
 
-func (p *DynPortServer) handleNATPMPRequest(addr net.Addr, buf []byte) error {
+func (p *DynPortServer) handleNATPMPRequest(conn net.PacketConn, addr net.Addr, buf []byte) error {
 	if len(buf) >= 2 {
 		switch buf[1] {
 		case 0:
-			return p.handleNATPMPExternalAddressRequest(addr)
+			return p.handleNATPMPExternalAddressRequest(conn, addr)
 		case 1: // UDP mapping request
-			return p.handleNATPMPMappingRequest(1, addr, buf[4:])
+			return p.handleNATPMPMappingRequest(conn, 1, addr, buf[4:])
 		case 2: // TCP mapping request
-			return p.handleNATPMPMappingRequest(2, addr, buf[4:])
+			return p.handleNATPMPMappingRequest(conn, 2, addr, buf[4:])
 		default:
 			// Respond with Unsupported opcode
-			p.responseWithErrorResultCode(addr, 5)
+			p.responseWithErrorResultCode(conn, addr, 5)
 			return fmt.Errorf("operation not implemented")
 		}
 
 	}
 	// Respond with Unsupported opcode
-	p.responseWithErrorResultCode(addr, 5)
+	p.responseWithErrorResultCode(conn, addr, 5)
 	return nil
 }
 
-func (p *DynPortServer) responseWithErrorResultCode(addr net.Addr, code uint16) {
+func (p *DynPortServer) responseWithErrorResultCode(conn net.PacketConn, addr net.Addr, code uint16) {
 	res := make([]byte, 8)
 	sec := time.Now().Unix() - p.started.Unix()
 	writeNetworkOrderUint16(res[2:4], code)
 	writeNetworkOrderUint32(res[4:8], uint32(sec)) // Seconds Since Start of Epoch
-	if p.conn != nil {
-		p.conn.WriteTo(res, addr)
+	if conn != nil {
+		conn.WriteTo(res, addr)
 	}
 }
 
-func (p *DynPortServer) handleNATPMPExternalAddressRequest(addr net.Addr) error {
+func (p *DynPortServer) handleNATPMPExternalAddressRequest(conn net.PacketConn, addr net.Addr) error {
 	res := make([]byte, 12)
 	res[1] = 128 + 0 // Response op code
 	// 2 byte result code
 	sec := time.Now().Unix() - p.started.Unix()
 	writeNetworkOrderUint32(res[4:8], uint32(sec)) // Seconds Since Start of Epoch
 	writeNetworkOrderIP(res[8:12], p.externalIP.To4())
-	if p.conn != nil {
-		_, err := p.conn.WriteTo(res, addr)
+	if conn != nil {
+		_, err := conn.WriteTo(res, addr)
 		return err
 	}
 	return nil
 }
-func (p *DynPortServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf []byte) error {
+func (p *DynPortServer) handleNATPMPMappingRequest(conn net.PacketConn, op byte, addr net.Addr, buf []byte) error {
 	internalPort, buf := readNetworkOrderUint16(buf)
 	externalPort, buf := readNetworkOrderUint16(buf)
 	lifetime, buf := readNetworkOrderUint32(buf)
@@ -230,20 +257,24 @@ func (p *DynPortServer) handleNATPMPMappingRequest(op byte, addr net.Addr, buf [
 	writeNetworkOrderUint16(res[8:10], internalPort)
 	writeNetworkOrderUint16(res[10:12], externalPort)
 	writeNetworkOrderUint32(res[12:16], lifetime)
-	if p.conn != nil {
-		_, err := p.conn.WriteTo(res, addr)
+	if conn != nil {
+		_, err := conn.WriteTo(res, addr)
 		return err
 	}
 	return nil
 }
 
-func (p *DynPortServer) Stop() error {
-	if p.conn != nil {
-		err := p.conn.Close()
-		p.conn = nil
-		return err
+func (p *DynPortServer) Stop() {
+	p.l.Debugf("stopping dynport server")
+	if p.conns != nil {
+		for _, conn := range p.conns {
+			err := conn.Close()
+			if err != nil {
+				p.l.With(zap.Error(err)).Errorf("error closing conn %s", conn.LocalAddr())
+			}
+		}
+		p.conns = nil
 	}
-	return nil
 }
 
 func (p *DynPortServer) RegisterListener(fn func(lease PortMappingLease)) {

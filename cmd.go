@@ -24,9 +24,9 @@ type ACLConfiguration struct {
 type Configuration struct {
 	ACLAllowDefault       bool
 	CreateChains          bool
-	DataDir               string `validate:"dir,required"`
-	ExternalIP            string `validate:"omitempty,ipv4"`
-	ListenAddr            string `validate:"hostname_port,required"`
+	DataDir               string   `validate:"dir,required"`
+	ExternalIP            string   `validate:"omitempty,ipv4"`
+	ListenAddrs           []string `validate:"required,dive,hostname_port,min=1"`
 	LogFormat             string
 	LogLevel              string
 	PortRange             string `validate:"range,required"`
@@ -53,7 +53,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().String("log-level", "INFO", "log level")
 	rootCmd.PersistentFlags().String("log-format", "json", "log format (plain/json)")
 	rootCmd.Flags().String("external-ip", "", "ip to report to client as external (default auto detect)")
-	rootCmd.Flags().String("listen-addr", ":5351", "address to listen on for nat-pmp requests")
+	rootCmd.Flags().StringSlice("listen-addrs", []string{}, "addresses to listen on for nat-pmp requests, needs to be actual ip")
 	rootCmd.Flags().Bool("create-chains", true, "create required chains")
 	rootCmd.Flags().Bool("skip-jump-check", false, "disable check of rule pointing to chains")
 	rootCmd.Flags().Bool("acl-allow-default", false, "default allow port mappings")
@@ -134,7 +134,14 @@ func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 		v.SetDefault(configName, f.DefValue)
 
 		if f.Changed {
-			v.Set(configName, f.Value)
+			if f.Value.Type() == "stringSlice" {
+				s := f.Value.String()
+				s = strings.TrimLeft(s, "[")
+				s = strings.TrimRight(s, "]")
+				v.Set(configName, s)
+			} else {
+				v.Set(configName, f.Value)
+			}
 		}
 	})
 }
