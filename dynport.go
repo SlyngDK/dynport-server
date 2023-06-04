@@ -15,7 +15,6 @@ import (
 type DynPortServer struct {
 	conns        []net.PacketConn
 	externalIP   net.IP
-	ipt          *IPTablesManager
 	l            *zap.SugaredLogger
 	listenAddrs  []string
 	started      time.Time
@@ -27,7 +26,6 @@ type DynPortServer struct {
 
 func NewDynPortServer(
 	l *zap.Logger,
-	ipt *IPTablesManager,
 	store *DataStore,
 	listenAddrs []string,
 	externalIP net.IP,
@@ -46,7 +44,6 @@ func NewDynPortServer(
 
 	p := &DynPortServer{
 		l:            l.Sugar(),
-		ipt:          ipt,
 		store:        store,
 		listenAddrs:  listenAddrs,
 		externalIP:   externalIP,
@@ -239,8 +236,6 @@ func (p *DynPortServer) handleNATPMPMappingRequest(conn net.PacketConn, op byte,
 		for _, listener := range p.listeners {
 			go listener(*lease)
 		}
-
-		p.ipt.Reconcile()
 
 		p.l.Debugf("created mapping request for %s internalPort %d, externalPort %d with lifetime %d", clientIP.String(), internalPort, externalPort, lifetime)
 	} else {
