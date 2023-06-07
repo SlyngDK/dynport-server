@@ -33,7 +33,7 @@ type IPTablesManager struct {
 }
 
 func NewIPTablesManager(l *zap.Logger, externalIP net.IP) (*IPTablesManager, error) {
-	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4), iptables.Sudo())
+	ipt, err := iptables.New(iptables.IPFamily(iptables.ProtocolIPv4))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create iptables instance, %v", err)
 	}
@@ -79,7 +79,7 @@ func (i *IPTablesManager) checkChain(table, chain string, createTables bool) err
 		if createTables {
 			err := i.ipt.NewChain(table, chain)
 			if err != nil {
-				return fmt.Errorf("failed to create chain %s %s", table, chain)
+				return fmt.Errorf("failed to create chain %s %s %w", table, chain, err)
 			}
 		} else {
 			return fmt.Errorf("%s table is missing %s chain", table, chain)

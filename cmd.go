@@ -24,7 +24,8 @@ type ACLConfiguration struct {
 type Configuration struct {
 	ACLAllowDefault       bool
 	CreateChains          bool
-	DataDir               string   `validate:"dir,required"`
+	DataDir               string `validate:"dir,required"`
+	EBPFEnabled           bool
 	ExternalIP            string   `validate:"omitempty,ipv4"`
 	ListenAddrs           []string `validate:"required,dive,hostname_port,min=1"`
 	LogFormat             string
@@ -57,6 +58,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.Flags().Bool("create-chains", true, "create required chains")
 	rootCmd.Flags().Bool("skip-jump-check", false, "disable check of rule pointing to chains")
 	rootCmd.Flags().Bool("acl-allow-default", false, "default allow port mappings")
+	rootCmd.Flags().Bool("ebpf-enabled", false, "use ebpf/xdp to bypass iptables and conntrack for udp")
 	rootCmd.Flags().String("port-range", "10000-19999", "external port range to allocate from")
 	rootCmd.Flags().String("replication-listen-addr", "", "enable and listen for replication requests")
 	rootCmd.Flags().StringSlice("replication-peers", []string{}, "peers to replicate with `x.x.x.x:8080`")

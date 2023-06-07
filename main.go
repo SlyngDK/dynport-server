@@ -71,6 +71,17 @@ func start() {
 	}
 	defer ipt.Close()
 
+	ebpfManager, err := NewEBPFManager(logger, externalIP, config.EBPFEnabled, config.ListenAddrs)
+	if err != nil {
+		logger.With(zap.Error(err)).Fatal("failed to create EBPFManager")
+	}
+	defer ebpfManager.Close()
+	err = ebpfManager.Load()
+	if err != nil {
+		ebpfManager.Close()
+		logger.With(zap.Error(err)).Fatal("failed to load EBPFManager")
+	}
+
 	if err = ipt.CheckPrerequisite(config.CreateChains, config.SkipJumpCheck); err != nil {
 		logger.With(zap.Error(err)).Fatal("prerequisite check failed")
 	}
@@ -82,11 +93,14 @@ func start() {
 	defer store.Close()
 
 	go ipt.StartReconcile(store.GetActiveLeases)
+	go ebpfManager.StartReconcile(store.GetActiveLeases)
 
-	ipt.Reconcile()
+	go ipt.Reconcile()
+	go ebpfManager.Reconcile()
 
 	replication := NewReplication(logger, store, config.ReplicationListenAddr, config.ReplicationSecret, config.ReplicationPeers)
 	replication.RegisterUpdateListener(ipt.Reconcile)
+	replication.RegisterUpdateListener(ebpfManager.Reconcile)
 	replication.Start()
 
 	go func() {
@@ -101,7 +115,7 @@ func start() {
 		}
 	}()
 
-	dynPortServer, err := NewDynPortServer(logger, ipt, store, config.ListenAddrs, externalIP, config.ACL, config.ACLAllowDefault)
+	dynPortServer, err := NewDynPortServer(logger, store, config.ListenAddrs, externalIP, config.ACL, config.ACLAllowDefault)
 	if err != nil {
 		logger.With(zap.Error(err)).Fatal("failed to create new dynPortServer server")
 	}
@@ -116,6 +130,10 @@ func start() {
 		}
 	}()
 
+	dynPortServer.RegisterListener(func(_ PortMappingLease) {
+		go ipt.Reconcile()
+		go ebpfManager.Reconcile()
+	})
 	dynPortServer.RegisterListener(replication.PortMappingLeaseListener)
 	err = dynPortServer.Start()
 	if err != nil {
