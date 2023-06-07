@@ -23,3 +23,9 @@ Flags:
       --replication-peers x.x.x.x:8080   peers to replicate with x.x.x.x:8080
       --skip-jump-check                  disable check of rule pointing to chains
 ```
+## Linux Capabilities required
+* cap_net_raw
+* cap_net_admin
+* cap_sys_admin
+
+LimitMEMLOCK=30000000

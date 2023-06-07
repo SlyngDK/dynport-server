@@ -150,7 +150,7 @@ func (r *Replication) PortMappingLeaseListener(lease PortMappingLease) {
 	if r.listenAddr == "" {
 		return
 	}
-	r.l.Sugar().Debug("received update for lease %s", lease.Id)
+	r.l.Sugar().Debugf("received update for lease %s", lease.Id)
 	jsonBytes, err := json.Marshal(lease)
 	if err != nil {
 		r.l.With(zap.Error(err)).Warn("failed to marshal lease")

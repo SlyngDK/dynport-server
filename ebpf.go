@@ -69,6 +69,7 @@ func NewEBPFManager(l *zap.Logger, externalIP net.IP, enabled bool, listenAddrs 
 
 func (e *EBPFManager) Load() error {
 	if e.enabled {
+		e.l.Info("loading ebpf")
 		xdp, err := xdpnatforward.LoadNatForward(nil)
 		if err != nil {
 			return fmt.Errorf("error: failed to load xdp program: %w\n", err)
@@ -109,6 +110,12 @@ func (e *EBPFManager) StartReconcile(leasesFn func() ([]*PortMappingLease, error
 		select {
 		case <-timer.C:
 			reconcileFn()
+			stats := e.xdp.Objs.GetStats()
+			e.l.
+				With(zap.Uint64("packets.outgoing", stats.Source)).
+				With(zap.Uint64("packets.incoming", stats.Destination)).
+				With(zap.Uint64("packets.totalForwarded", stats.Redirect)).
+				Debug("ebpf stats")
 		case <-e.reconcileCh:
 			reconcileFn()
 		case <-e.reconcileCloseCh:

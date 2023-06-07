@@ -22,8 +22,6 @@ require (
 	go.uber.org/zap v1.24.0
 )
 
-replace github.com/coreos/go-iptables => github.com/slyngdk/go-iptables v0.0.0-20230212184852-41950b3865a8
-
 require (
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/dgraph-io/badger v1.6.0 // indirect

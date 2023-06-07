@@ -213,8 +213,6 @@ SEC("xdp") int xdp_nat_forward(struct xdp_md *ctx){
                             __sync_fetch_and_add(destination_count, 1);
                         }
 
-                        bpf_printk("destination ingress ifIndex: %d", ctx->ingress_ifindex);
-
                          __builtin_memcpy(eth->h_dest, &value->dmac, ETH_ALEN);
                         __builtin_memcpy(eth->h_source, &value->smac, ETH_ALEN);
                         iph->daddr = value->ip;
