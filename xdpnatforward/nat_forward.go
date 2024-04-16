@@ -8,6 +8,7 @@ import (
 	"github.com/asavie/xdp"
 	"github.com/cilium/ebpf"
 	"github.com/google/gopacket/routing"
+	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	"net"
 	"strconv"
@@ -239,4 +240,40 @@ func IPv4ToInt(ipaddr net.IP) (uint32, error) {
 		return 0, fmt.Errorf("not an IPv4 addres")
 	}
 	return binary.BigEndian.Uint32(ipaddr.To4()), nil
+}
+
+func NewSettings(noNatCidr []net.IPNet) (*natforwardSettings, error) {
+
+	if len(noNatCidr) > 10 {
+		return nil, fmt.Errorf("max 10 noNatCidr are allowed")
+	}
+
+	var bpfNoNatCidr [10]struct {
+		Ip      uint32
+		Netmask uint32
+	}
+
+	for i, ipNet := range noNatCidr {
+
+		ip, err := IPv4ToInt(ipNet.IP)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to convert ip: %s", ipNet.IP)
+		}
+
+		_, maskLen := ipNet.Mask.Size()
+		if maskLen != 32 {
+			return nil, errors.Errorf("netmask is of wrong lenght: %s", ipNet.Mask)
+		}
+
+		netmask := binary.BigEndian.Uint32(ipNet.Mask)
+
+		bpfNoNatCidr[i] = struct {
+			Ip      uint32
+			Netmask uint32
+		}{Ip: ip, Netmask: netmask}
+	}
+
+	return &natforwardSettings{
+		BpfNoNatCidr: bpfNoNatCidr,
+	}, nil
 }

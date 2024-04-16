@@ -18,6 +18,7 @@ Flags:
       --listen-addrs strings             addresses to listen on for nat-pmp requests, needs to be actual ip
       --log-format string                log format (plain/json) (default "json")
       --log-level string                 log level (default "INFO")
+      --no-nat-cidr strings              dont nat these cidr (max 10)
       --port-range string                external port range to allocate from (default "10000-19999")
       --replication-listen-addr string   enable and listen for replication requests
       --replication-peers x.x.x.x:8080   peers to replicate with x.x.x.x:8080

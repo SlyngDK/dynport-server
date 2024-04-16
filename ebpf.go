@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/google/gopacket/routing"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"net"
 	"net/netip"
@@ -18,13 +19,15 @@ type EBPFManager struct {
 	externalIP       net.IP
 	enabled          bool
 	interfaceIndices []int
+	noNatIPNets      []net.IPNet
 	xdp              *xdpnatforward.XDPProgram
 }
 
-func NewEBPFManager(l *zap.Logger, externalIP net.IP, enabled bool, listenAddrs []string) (*EBPFManager, error) {
+func NewEBPFManager(l *zap.Logger, externalIP net.IP, enabled bool, listenAddrs []string, noNatCidr []string) (*EBPFManager, error) {
 	l = l.Named("ebpf")
 
 	var interfaceIndices []int
+	var noNatIPNets []net.IPNet
 
 	if enabled {
 		interfaceIndicesSet := make(map[int]interface{})
@@ -54,6 +57,15 @@ func NewEBPFManager(l *zap.Logger, externalIP net.IP, enabled bool, listenAddrs 
 		for i := range interfaceIndicesSet {
 			interfaceIndices = append(interfaceIndices, i)
 		}
+
+		noNatIPNets = make([]net.IPNet, 0)
+		for _, cidr := range noNatCidr {
+			_, n, err := net.ParseCIDR(cidr)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to parse ip net: %s", cidr)
+			}
+			noNatIPNets = append(noNatIPNets, *n)
+		}
 	}
 	reconcileCh := make(chan interface{}, 2)
 	reconcileCloseCh := make(chan interface{}, 2)
@@ -63,6 +75,7 @@ func NewEBPFManager(l *zap.Logger, externalIP net.IP, enabled bool, listenAddrs 
 		reconcileCloseCh: reconcileCloseCh,
 		externalIP:       externalIP,
 		enabled:          enabled,
+		noNatIPNets:      noNatIPNets,
 		interfaceIndices: interfaceIndices,
 	}, nil
 }
@@ -75,6 +88,15 @@ func (e *EBPFManager) Load() error {
 			return fmt.Errorf("error: failed to load xdp program: %w\n", err)
 		}
 		e.xdp = xdp
+
+		settings, err := xdpnatforward.NewSettings(e.noNatIPNets)
+		if err != nil {
+			return errors.Wrapf(err, "error when creating settings")
+		}
+		err = e.xdp.Objs.Settings.Put(uint8(0), settings)
+		if err != nil {
+			return errors.Wrapf(err, "failed to put settings")
+		}
 
 		for _, Ifindex := range e.interfaceIndices {
 			if err := e.xdp.Program.Attach(Ifindex); err != nil {

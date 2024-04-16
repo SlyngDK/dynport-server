@@ -23,6 +23,13 @@ type natforwardRemappingMap struct {
 	_       [2]byte
 }
 
+type natforwardSettings struct {
+	BpfNoNatCidr [10]struct {
+		Ip      uint32
+		Netmask uint32
+	}
+}
+
 // loadNatforward returns the embedded CollectionSpec for natforward.
 func loadNatforward() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_NatforwardBytes)
@@ -73,6 +80,7 @@ type natforwardProgramSpecs struct {
 type natforwardMapSpecs struct {
 	Destinations  *ebpf.MapSpec `ebpf:"destinations"`
 	RxCnt         *ebpf.MapSpec `ebpf:"rx_cnt"`
+	Settings      *ebpf.MapSpec `ebpf:"settings"`
 	Sources       *ebpf.MapSpec `ebpf:"sources"`
 	XdpStatsProto *ebpf.MapSpec `ebpf:"xdp_stats_proto"`
 }
@@ -98,6 +106,7 @@ func (o *natforwardObjects) Close() error {
 type natforwardMaps struct {
 	Destinations  *ebpf.Map `ebpf:"destinations"`
 	RxCnt         *ebpf.Map `ebpf:"rx_cnt"`
+	Settings      *ebpf.Map `ebpf:"settings"`
 	Sources       *ebpf.Map `ebpf:"sources"`
 	XdpStatsProto *ebpf.Map `ebpf:"xdp_stats_proto"`
 }
@@ -106,6 +115,7 @@ func (m *natforwardMaps) Close() error {
 	return _NatforwardClose(
 		m.Destinations,
 		m.RxCnt,
+		m.Settings,
 		m.Sources,
 		m.XdpStatsProto,
 	)
