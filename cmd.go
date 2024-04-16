@@ -30,7 +30,8 @@ type Configuration struct {
 	ListenAddrs           []string `validate:"required,dive,hostname_port,min=1"`
 	LogFormat             string
 	LogLevel              string
-	PortRange             string `validate:"range,required"`
+	NoNatCidr             []string `validate:"max=10,dive,cidrv4"`
+	PortRange             string   `validate:"range,required"`
 	SkipJumpCheck         bool
 	ACL                   []ACLConfiguration
 	ReplicationListenAddr string `validate:"omitempty,hostname_port"`
@@ -55,6 +56,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().String("log-format", "json", "log format (plain/json)")
 	rootCmd.Flags().String("external-ip", "", "ip to report to client as external (default auto detect)")
 	rootCmd.Flags().StringSlice("listen-addrs", []string{}, "addresses to listen on for nat-pmp requests, needs to be actual ip")
+	rootCmd.Flags().StringSlice("no-nat-cidr", []string{}, "don't nat these cidr (max 10)")
 	rootCmd.Flags().Bool("create-chains", true, "create required chains")
 	rootCmd.Flags().Bool("skip-jump-check", false, "disable check of rule pointing to chains")
 	rootCmd.Flags().Bool("acl-allow-default", false, "default allow port mappings")
@@ -133,7 +135,9 @@ func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 
 		v.BindEnv(configName, "DP_"+strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_")))
 
-		v.SetDefault(configName, f.DefValue)
+		if f.Value.Type() != "stringSlice" {
+			v.SetDefault(configName, f.DefValue)
+		}
 
 		if f.Changed {
 			if f.Value.Type() == "stringSlice" {

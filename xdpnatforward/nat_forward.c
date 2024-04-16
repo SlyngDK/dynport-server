@@ -10,6 +10,7 @@
 #include <bpf/bpf_endian.h>
 
 #define MAX_UDP_SIZE 8980
+#define MAX_NO_NAT_IPS 10
 
 unsigned int RX_CNT_PROCESSED	= 0;
 unsigned int RX_CNT_SOURCE	= 1;
@@ -53,6 +54,22 @@ struct {
 	__type(value, struct remapping_map);
 	__uint(max_entries, 50);
 } sources SEC(".maps");
+
+struct cidr {
+    __be32 ip;
+    __be32 netmask;
+};
+
+struct settings {
+    struct cidr bpf_no_nat_cidr[MAX_NO_NAT_IPS];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, 1);// IP + port
+	__type(value, struct settings);
+	__uint(max_entries, 1);
+} settings SEC(".maps");
 
 static __always_inline __u16 ip_checksum(unsigned short *buf, int bufsz) {
     unsigned long sum = 0;
@@ -111,6 +128,21 @@ static inline __u16 caludpcsum(struct iphdr *iph, struct udphdr *udph, void *dat
     return csum;
 }
 
+__u8 nat_ip(__be32 addr)
+{
+    __u8 key = 0;
+    struct settings *value = bpf_map_lookup_elem(&settings, &key);
+    if(value){
+        for(int i = 0; i < MAX_NO_NAT_IPS; i++){
+            struct cidr n = value->bpf_no_nat_cidr[i];
+            if(n.ip == 0) continue;
+            if ((bpf_ntohl(addr) & n.netmask) == (n.ip & n.netmask)){
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
 
 SEC("xdp") int xdp_nat_forward(struct xdp_md *ctx){
 
@@ -163,37 +195,39 @@ SEC("xdp") int xdp_nat_forward(struct xdp_md *ctx){
 
                 struct remapping_map *value = bpf_map_lookup_elem(&sources, &key);
                 if(value && value->dmac && value->smac && value->ip && value->port) {
-                    __u64 *source_count = bpf_map_lookup_elem(&rx_cnt, &RX_CNT_SOURCE);
-                    if (!source_count) {
-                        __u64 init_count = 1;
-                        bpf_map_update_elem(&rx_cnt, &RX_CNT_SOURCE, &init_count, BPF_ANY);
-                    } else {
-                        __sync_fetch_and_add(source_count, 1);
-                    }
-
-                    __builtin_memcpy(eth->h_dest, &value->dmac, ETH_ALEN);
-                    __builtin_memcpy(eth->h_source, &value->smac, ETH_ALEN);
-                    iph->saddr = value->ip;
-                    udp->source = value->port;
-
-                    iph->check = 0;
-                    iph->check = ip_checksum((__u16 *)iph, sizeof(struct iphdr));
-                    udp->check = 0;
-                    udp->check = caludpcsum(iph, udp, data_end);
-
-
-                    int ret = bpf_redirect(value->ifindex, 0);
-                    if (ret == XDP_REDIRECT) {
-                        __u64 *redirect_count = bpf_map_lookup_elem(&rx_cnt, &RX_CNT_REDIRECT);
-                        if (!redirect_count) {
+                    if(nat_ip(iph->daddr)){
+                        __u64 *source_count = bpf_map_lookup_elem(&rx_cnt, &RX_CNT_SOURCE);
+                        if (!source_count) {
                             __u64 init_count = 1;
-                            bpf_map_update_elem(&rx_cnt, &RX_CNT_REDIRECT, &init_count, BPF_ANY);
+                            bpf_map_update_elem(&rx_cnt, &RX_CNT_SOURCE, &init_count, BPF_ANY);
                         } else {
-                            __sync_fetch_and_add(redirect_count, 1);
+                            __sync_fetch_and_add(source_count, 1);
+                        }
+
+                        __builtin_memcpy(eth->h_dest, &value->dmac, ETH_ALEN);
+                        __builtin_memcpy(eth->h_source, &value->smac, ETH_ALEN);
+                        iph->saddr = value->ip;
+                        udp->source = value->port;
+
+                        iph->check = 0;
+                        iph->check = ip_checksum((__u16 *)iph, sizeof(struct iphdr));
+                        udp->check = 0;
+                        udp->check = caludpcsum(iph, udp, data_end);
+
+
+                        int ret = bpf_redirect(value->ifindex, 0);
+                        if (ret == XDP_REDIRECT) {
+                            __u64 *redirect_count = bpf_map_lookup_elem(&rx_cnt, &RX_CNT_REDIRECT);
+                            if (!redirect_count) {
+                                __u64 init_count = 1;
+                                bpf_map_update_elem(&rx_cnt, &RX_CNT_REDIRECT, &init_count, BPF_ANY);
+                            } else {
+                                __sync_fetch_and_add(redirect_count, 1);
+                            }
+                            return ret;
                         }
                         return ret;
                     }
-                    return ret;
                 } else {
                     char key[6];
                     key[0] = iph->daddr;

@@ -71,7 +71,7 @@ func start() {
 	}
 	defer ipt.Close()
 
-	ebpfManager, err := NewEBPFManager(logger, externalIP, config.EBPFEnabled, config.ListenAddrs)
+	ebpfManager, err := NewEBPFManager(logger, externalIP, config.EBPFEnabled, config.ListenAddrs, config.NoNatCidr)
 	if err != nil {
 		logger.With(zap.Error(err)).Fatal("failed to create EBPFManager")
 	}
