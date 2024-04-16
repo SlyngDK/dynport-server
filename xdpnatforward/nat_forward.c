@@ -66,7 +66,7 @@ struct settings {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(key_size, 1);// IP + port
+	__uint(key_size, 1);
 	__type(value, struct settings);
 	__uint(max_entries, 1);
 } settings SEC(".maps");
